@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Canon Triage</title>
+<style>
+  :root {
+    --bg:#14110f; --surface:#1f1a17; --card:#2a2320; --ink:#f2ebe2; --muted:#8a7f74;
+    --line:#3a322d; --card-it:#d98324; --know:#4a9d7f; --maybe:#6c7a89;
+    --display:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:var(--ui);overscroll-behavior:none;}
+  #app{height:100dvh;display:flex;flex-direction:column;}
+
+  /* gate / loader for picking the json file */
+  #gate{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;padding:28px;text-align:center;z-index:50;}
+  #gate h1{font-family:var(--display);font-weight:600;font-size:26px;margin:0;}
+  #gate p{color:var(--muted);max-width:360px;font-size:14px;line-height:1.5;margin:0;}
+  .filebtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);
+    border-radius:12px;padding:13px 18px;font-size:14px;font-weight:600;cursor:pointer;}
+  .filebtn.accent{border-color:var(--card-it);color:var(--card-it);}
+  .gate-row{display:flex;flex-direction:column;gap:8px;width:100%;max-width:300px;}
+  .gate-label{font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;}
+
+  header{flex:0 0 auto;padding:12px 18px 6px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  header .title{font-family:var(--display);font-size:16px;color:var(--muted);}
+  header .stats{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);text-align:right;line-height:1.4;}
+  header .stats b{color:var(--card-it);}
+
+  #floorbar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 18px 6px;font-size:12px;color:var(--muted);}
+  #floorbar button{border:1px solid var(--line);background:var(--surface);color:var(--muted);
+    border-radius:8px;width:26px;height:26px;font-size:14px;cursor:pointer;}
+  #floorbar .val{color:var(--ink);font-variant-numeric:tabular-nums;min-width:14px;text-align:center;}
+
+  #progress{flex:0 0 auto;height:2px;background:var(--line);margin:0 18px;border-radius:2px;overflow:hidden;}
+  #progress>div{height:100%;width:0%;background:var(--ink);transition:width .25s ease;}
+
+  #stage{flex:1 1 auto;position:relative;overflow:hidden;}
+  .card{position:absolute;inset:18px;background:var(--card);border:1px solid var(--line);
+    border-radius:22px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:28px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.45);
+    will-change:transform,opacity;touch-action:none;}
+  .card .freq{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:18px;}
+  .card .answer{font-family:var(--display);font-weight:600;line-height:1.08;font-size:clamp(28px,7.5vw,50px);}
+  .card .tags{margin-top:22px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+  .card .tag{font-size:12px;letter-spacing:.03em;color:var(--muted);border:1px solid var(--line);
+    border-radius:999px;padding:4px 12px;}
+
+  .stamp{position:absolute;top:26px;font-weight:800;font-size:19px;letter-spacing:.12em;
+    text-transform:uppercase;padding:8px 14px;border-radius:10px;border:3px solid;opacity:0;pointer-events:none;}
+  .stamp.left{left:26px;color:var(--card-it);border-color:var(--card-it);transform:rotate(-12deg);}
+  .stamp.right{right:26px;color:var(--know);border-color:var(--know);transform:rotate(12deg);}
+  .stamp.up{left:50%;transform:translateX(-50%);top:50%;color:var(--maybe);border-color:var(--maybe);}
+
+  footer{flex:0 0 auto;padding:10px 18px calc(12px + env(safe-area-inset-bottom));}
+  .actions{display:flex;gap:10px;}
+  .btn{flex:1;border:1px solid var(--line);background:var(--surface);color:var(--ink);
+    border-radius:14px;padding:13px 8px;font-size:13px;font-weight:600;cursor:pointer;}
+  .btn .k{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-top:3px;}
+  .btn.card-it{border-color:var(--card-it);color:var(--card-it);}
+  .btn.know{border-color:var(--know);color:var(--know);}
+  .btn.maybe{border-color:var(--maybe);color:var(--maybe);}
+  .bar2{display:flex;gap:10px;margin-top:10px;}
+  .bar2 .btn{padding:9px;font-size:12px;font-weight:500;color:var(--muted);}
+
+  #done{position:absolute;inset:18px;display:none;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;gap:14px;}
+  #done h2{font-family:var(--display);font-weight:600;font-size:28px;margin:0;}
+  #done p{color:var(--muted);margin:0;font-size:14px;}
+  .tally{display:flex;gap:22px;margin-top:6px;}
+  .tally div{font-size:13px;color:var(--muted);}
+  .tally b{display:block;font-family:var(--display);font-size:26px;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .tally .ci b{color:var(--card-it);} .tally .kn b{color:var(--know);} .tally .mb b{color:var(--maybe);}
+
+  .toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    background:var(--surface);border:1px solid var(--line);color:var(--ink);padding:8px 14px;
+    border-radius:10px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:40;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="gate">
+    <h1>Canon triage</h1>
+    <p>Load your <b>candidates.json</b> from this device. Your data stays on your phone — nothing is uploaded. To continue a prior session, also load your last <b>cards_export.json</b>.</p>
+    <div class="gate-row">
+      <span class="gate-label">Candidates (required)</span>
+      <button class="filebtn accent" onclick="document.getElementById('candFile').click()">Choose candidates.json</button>
+      <input id="candFile" type="file" accept=".json" hidden>
+    </div>
+    <div class="gate-row">
+      <span class="gate-label">Resume file (optional)</span>
+      <button class="filebtn" onclick="document.getElementById('resumeFile').click()">Choose previous export</button>
+      <input id="resumeFile" type="file" accept=".json" hidden>
+    </div>
+    <button class="filebtn accent" id="startBtn" style="display:none" onclick="startSession()">Start swiping →</button>
+    <p id="gateStatus" style="font-size:13px"></p>
+  </div>
+
+  <header>
+    <span class="title">Canon triage</span>
+    <span class="stats" id="stats"></span>
+  </header>
+  <div id="floorbar">
+    <span>min frequency</span>
+    <button onclick="changeFloor(-1)">–</button>
+    <span class="val" id="floorVal">4</span>
+    <button onclick="changeFloor(1)">+</button>
+    <span id="floorPool" style="margin-left:6px"></span>
+  </div>
+  <div id="progress"><div id="progressbar"></div></div>
+  <div id="stage">
+    <div id="done">
+      <h2>Queue clear</h2>
+      <p>Export your card list, then resume anytime by loading it back.</p>
+      <div class="tally">
+        <div class="ci"><b id="t-card">0</b>card it</div>
+        <div class="kn"><b id="t-know">0</b>know it</div>
+        <div class="mb"><b id="t-maybe">0</b>maybe</div>
+      </div>
+      <button class="btn" style="max-width:240px" onclick="exportCards()">Export card list (JSON)</button>
+    </div>
+  </div>
+  <footer>
+    <div class="actions">
+      <button class="btn card-it" onclick="decide('card')">Card it<span class="k">← left</span></button>
+      <button class="btn maybe" onclick="decide('maybe')">Maybe<span class="k">↑ up</span></button>
+      <button class="btn know" onclick="decide('know')">Know it<span class="k">→ right</span></button>
+    </div>
+    <div class="bar2">
+      <button class="btn" onclick="undo()">Undo</button>
+      <button class="btn" onclick="exportCards()">Export</button>
+    </div>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// ---------- state ----------
+let ALL = [];                 // all candidates from file
+let pool = [];                // candidates at/above current floor, not yet judged
+let floor = 4;
+let current = null;
+const verdicts = new Map();   // key -> {answer,count,verdict}  (persists across floor changes)
+const history = [];           // keys in order judged (for undo)
+
+// bandit strata: key = `${freqBand}|${cap}` -> {a, b}  (Beta successes+1, failures+1)
+const strata = new Map();
+function freqBand(c){ if(c>=40)return"40+"; if(c>=20)return"20-39"; if(c>=12)return"12-19";
+  if(c>=8)return"8-11"; if(c>=6)return"6-7"; if(c>=4)return"4-5"; return"2-3"; }
+function stratumKey(it){ return freqBand(it.count)+"|"+(it.capitalized?"C":"c"); }
+function getStratum(k){ if(!strata.has(k)) strata.set(k,{a:1,b:1}); return strata.get(k); }
+function sampleBeta(a,b){ // Marsaglia-Tsang via two gammas
+  const ga=randGamma(a), gb=randGamma(b); return ga/(ga+gb);
+}
+function randGamma(k){ // k>0
+  if(k<1){ const u=Math.random(); return randGamma(1+k)*Math.pow(u,1/k); }
+  const d=k-1/3, c=1/Math.sqrt(9*d);
+  while(true){ let x,v;
+    do{ x=gauss(); v=1+c*x; }while(v<=0);
+    v=v*v*v; const u=Math.random();
+    if(u<1-0.0331*x*x*x*x) return d*v;
+    if(Math.log(u)<0.5*x*x+d*(1-v+Math.log(v))) return d*v;
+  }
+}
+function gauss(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+// ---------- load ----------
+let candLoaded=false;
+document.getElementById('candFile').addEventListener('change', e=>{
+  readJSON(e.target.files[0], data=>{
+    ALL = data.map(d=>({...d, capitalized: fixCap(d)}));
+    candLoaded=true;
+    setGateStatus(`Loaded ${ALL.length.toLocaleString()} candidates.`);
+    maybeShowStart();
+  });
+});
+document.getElementById('resumeFile').addEventListener('change', e=>{
+  readJSON(e.target.files[0], data=>{
+    const list = data.decisions || data;
+    let n=0;
+    for(const d of list){ if(d.key && d.verdict){ verdicts.set(d.key,{answer:d.answer,count:d.count,verdict:d.verdict}); n++; } }
+    // rebuild bandit posteriors from prior verdicts
+    for(const v of verdicts.values()){
+      const it = {count:v.count, capitalized: false};
+      // we don't have cap in export; approximate from ALL if present
+    }
+    setGateStatus(`Resuming: ${n.toLocaleString()} prior decisions loaded.`);
+    maybeShowStart();
+  });
+});
+function maybeShowStart(){ if(candLoaded) document.getElementById('startBtn').style.display='block'; }
+function setGateStatus(t){ document.getElementById('gateStatus').textContent=t; }
+function readJSON(file, cb){ const r=new FileReader();
+  r.onload=()=>{ try{ cb(JSON.parse(r.result)); }catch(err){ setGateStatus('Could not parse that file.'); } };
+  r.readAsText(file); }
+
+// strip leading "(First Name)" so Bach / Eastwood / Longfellow read as proper nouns
+function fixCap(d){
+  let s=(d.answer||"").replace(/^\([^)]*\)\s*/,'').replace(/^(the|a|an)\s+/i,'').trim();
+  const w=s.split(/\s+/)[0]||"";
+  return /^[A-Z]/.test(w);
+}
+
+// ---------- session ----------
+function rebuildPosteriors(){
+  strata.clear();
+  // rebuild from ALL using stored verdicts (ALL has the capitalization feature)
+  for(const it of ALL){
+    const v = verdicts.get(it.key);
+    if(!v || v.verdict==='maybe') continue;
+    const s = getStratum(stratumKey(it));
+    if(v.verdict==='card') s.a++; else s.b++;
+  }
+}
+function buildPool(){
+  pool = ALL.filter(it=> it.count>=floor && !verdicts.has(it.key));
+}
+function startSession(){
+  document.getElementById('gate').style.display='none';
+  rebuildPosteriors();
+  buildPool();
+  updateFloorPool();
+  next();
+  updateStats();
+}
+
+function pickNext(){
+  if(pool.length===0) return null;
+  // Thompson sample a stratum, then take highest-count unseen item from it.
+  // Group pool indices by stratum lazily.
+  const byStratum = new Map();
+  for(const it of pool){
+    const k=stratumKey(it);
+    if(!byStratum.has(k)) byStratum.set(k,[]);
+    byStratum.get(k).push(it);
+  }
+  let best=null, bestSample=-1;
+  for(const [k,items] of byStratum){
+    const s=getStratum(k);
+    const draw=sampleBeta(s.a,s.b);
+    if(draw>bestSample){ bestSample=draw; best=items; }
+  }
+  // highest count within chosen stratum
+  best.sort((x,y)=>y.count-x.count);
+  return best[0];
+}
+
+function next(){
+  if(current){ const el=document.getElementById('liveCard'); if(el) el.remove(); }
+  current = pickNext();
+  updateStats();
+  if(!current){ showDone(); return; }
+  const it=current;
+  const el=document.createElement('div');
+  el.className='card'; el.id='liveCard';
+  const tags=[];
+  tags.push(`<span class="tag">${it.capitalized?'name/title':'common word'}</span>`);
+  el.innerHTML=`<div class="stamp left">Card it</div><div class="stamp right">Know it</div><div class="stamp up">Maybe</div>
+    <div class="freq">seen ${it.count}×</div>
+    <div class="answer">${esc(it.answer)}</div>
+    <div class="tags">${tags.join('')}</div>`;
+  document.getElementById('stage').appendChild(el);
+  attachDrag(el);
+}
+function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// ---------- swipe ----------
+let startX=0,startY=0,dragging=false,dx=0,dy=0;
+function attachDrag(el){
+  el.addEventListener('touchstart',onStart,{passive:true});
+  el.addEventListener('touchmove',onMove,{passive:false});
+  el.addEventListener('touchend',onEnd);
+  el.addEventListener('mousedown',onStart);
+}
+function onStart(e){ dragging=true; const p=e.touches?e.touches[0]:e; startX=p.clientX;startY=p.clientY;dx=0;dy=0;
+  if(!e.touches){window.addEventListener('mousemove',onMove);window.addEventListener('mouseup',onEnd);} }
+function onMove(e){ if(!dragging)return; const p=e.touches?e.touches[0]:e; dx=p.clientX-startX;dy=p.clientY-startY;
+  if(e.cancelable)e.preventDefault();
+  const el=document.getElementById('liveCard'); if(!el)return;
+  el.style.transform=`translate(${dx}px,${dy}px) rotate(${dx*0.05}deg)`;
+  const horiz=Math.abs(dx)>Math.abs(dy);
+  el.querySelector('.stamp.left').style.opacity =(horiz&&dx<0)?Math.min(1,-dx/90):0;
+  el.querySelector('.stamp.right').style.opacity=(horiz&&dx>0)?Math.min(1,dx/90):0;
+  el.querySelector('.stamp.up').style.opacity   =(!horiz&&dy<0)?Math.min(1,-dy/90):0;
+}
+function onEnd(){ if(!dragging)return; dragging=false;
+  window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onEnd);
+  const T=90, el=document.getElementById('liveCard'); if(!el)return;
+  if(Math.abs(dx)>Math.abs(dy)&&dx<-T)return fling('card',-1);
+  if(Math.abs(dx)>Math.abs(dy)&&dx>T)return fling('know',1);
+  if(Math.abs(dy)>Math.abs(dx)&&dy<-T)return fling('maybe',0);
+  el.style.transition='transform .2s ease'; el.style.transform='';
+  setTimeout(()=>{if(el)el.style.transition='';},200);
+}
+function fling(verdict,dir){
+  const el=document.getElementById('liveCard'); if(!el)return;
+  el.style.transition='transform .3s ease,opacity .3s ease';
+  const outX=dir*window.innerWidth, outY=dir===0?-window.innerHeight:dy;
+  el.style.transform=`translate(${outX}px,${outY}px) rotate(${dir*18}deg)`; el.style.opacity='0';
+  record(verdict);
+}
+function decide(verdict){ if(!current)return; const dir=verdict==='card'?-1:verdict==='know'?1:0; fling(verdict,dir); }
+
+function record(verdict){
+  const it=current;
+  verdicts.set(it.key,{key:it.key,answer:it.answer,count:it.count,verdict});
+  history.push(it.key);
+  if(verdict!=='maybe'){ const s=getStratum(stratumKey(it)); if(verdict==='card')s.a++; else s.b++; }
+  pool=pool.filter(x=>x.key!==it.key);
+  toast(verdict==='card'?'→ card list':verdict==='know'?'skipped':'maybe');
+  setTimeout(next,160);
+}
+function undo(){
+  if(history.length===0)return;
+  const k=history.pop(); const v=verdicts.get(k); verdicts.delete(k);
+  if(v && v.verdict!=='maybe'){ const it=ALL.find(x=>x.key===k); if(it){ const s=getStratum(stratumKey(it)); if(v.verdict==='card')s.a=Math.max(1,s.a-1); else s.b=Math.max(1,s.b-1); } }
+  buildPool();
+  const cur=document.getElementById('liveCard'); if(cur)cur.remove();
+  current=ALL.find(x=>x.key===k)||null;
+  if(current){ // re-show the undone card
+    const it=current; const el=document.createElement('div'); el.className='card'; el.id='liveCard';
+    el.innerHTML=`<div class="stamp left">Card it</div><div class="stamp right">Know it</div><div class="stamp up">Maybe</div>
+      <div class="freq">seen ${it.count}×</div><div class="answer">${esc(it.answer)}</div>
+      <div class="tags"><span class="tag">${it.capitalized?'name/title':'common word'}</span></div>`;
+    document.getElementById('stage').appendChild(el); attachDrag(el);
+  }
+  updateStats();
+}
+
+// ---------- floor ----------
+function changeFloor(delta){
+  const order=[2,3,4,5,6,8,12,20,40];
+  let idx=order.indexOf(floor); if(idx<0)idx=2;
+  idx=Math.max(0,Math.min(order.length-1,idx+delta)); floor=order[idx];
+  document.getElementById('floorVal').textContent=floor;
+  buildPool(); updateFloorPool(); updateStats();
+  document.getElementById('done').style.display='none';
+  if(!current||current.count<floor){ const el=document.getElementById('liveCard'); if(el)el.remove(); next(); }
+}
+function updateFloorPool(){
+  const remaining=ALL.filter(it=>it.count>=floor && !verdicts.has(it.key)).length;
+  document.getElementById('floorPool').textContent=`· ${remaining.toLocaleString()} left in queue`;
+}
+
+// ---------- ui ----------
+let toastT;
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1';
+  clearTimeout(toastT); toastT=setTimeout(()=>t.style.opacity='0',650); }
+function updateStats(){
+  let card=0,know=0,maybe=0;
+  for(const v of verdicts.values()){ if(v.verdict==='card')card++; else if(v.verdict==='know')know++; else maybe++; }
+  const judged=card+know+maybe;
+  const inFloor=ALL.filter(it=>it.count>=floor).length;
+  document.getElementById('stats').innerHTML=`<b>${card}</b> carded · ${judged.toLocaleString()} judged<br>${(inFloor-judged>0?inFloor-judged:0).toLocaleString()} of ${inFloor.toLocaleString()} left`;
+  document.getElementById('progressbar').style.width=(inFloor? (judged/inFloor*100):0)+'%';
+  updateFloorPool();
+}
+function showDone(){
+  document.getElementById('done').style.display='flex';
+  let c=0,k=0,m=0; for(const v of verdicts.values()){if(v.verdict==='card')c++;else if(v.verdict==='know')k++;else m++;}
+  document.getElementById('t-card').textContent=c;
+  document.getElementById('t-know').textContent=k;
+  document.getElementById('t-maybe').textContent=m;
+}
+function exportCards(){
+  const decisions=[...verdicts.values()];
+  const cards=decisions.filter(d=>d.verdict==='card');
+  const payload={ exported:new Date().toISOString(), floor,
+    counts:{card:cards.length, total:decisions.length},
+    card_list:cards.map(d=>({key:d.key,answer:d.answer,count:d.count})),
+    decisions };  // full set so a re-load resumes everything
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download='cards_export.json'; a.click(); URL.revokeObjectURL(url);
+  toast(`exported ${cards.length} cards`);
+}
+
+document.addEventListener('keydown',e=>{
+  if(document.getElementById('gate').style.display==='none'){
+    if(e.key==='ArrowLeft')decide('card');
+    else if(e.key==='ArrowRight')decide('know');
+    else if(e.key==='ArrowUp')decide('maybe');
+    else if((e.key==='z')&&(e.metaKey||e.ctrlKey))undo();
+  }
+});
+</script>
+</body>
+</html>
