@@ -153,8 +153,24 @@ const history = [];           // keys in order judged (for undo)
 const strata = new Map();
 function freqBand(c){ if(c>=40)return"40+"; if(c>=20)return"20-39"; if(c>=12)return"12-19";
   if(c>=8)return"8-11"; if(c>=6)return"6-7"; if(c>=4)return"4-5"; return"2-3"; }
-function stratumKey(it){ return freqBand(it.count)+"|"+(it.capitalized?"C":"c"); }
+function stratumKey(it){ return (it.category||"Mixed")+"|"+freqBand(it.count)+"|"+(it.capitalized?"C":"c"); }
+// coarser backoff keys: drop cap, then drop freq, then category-only
+function backoffKeys(it){
+  const cat=it.category||"Mixed", fb=freqBand(it.count), cap=it.capitalized?"C":"c";
+  return [ cat+"|"+fb+"|"+cap, cat+"|"+fb, cat ];
+}
 function getStratum(k){ if(!strata.has(k)) strata.set(k,{a:1,b:1}); return strata.get(k); }
+// posterior estimate for an item: use the finest stratum with enough observations,
+// else blend toward coarser ones (more data, less specificity)
+function itemPosterior(it){
+  const keys=backoffKeys(it);
+  for(const k of keys){
+    const s=strata.get(k);
+    if(s && (s.a-1 + s.b-1) >= 8) return s;   // enough data at this granularity
+  }
+  // not enough anywhere: return finest (wide posterior -> exploration)
+  return getStratum(keys[0]);
+}
 function sampleBeta(a,b){ // Marsaglia-Tsang via two gammas
   const ga=randGamma(a), gb=randGamma(b); return ga/(ga+gb);
 }
@@ -211,12 +227,14 @@ function fixCap(d){
 // ---------- session ----------
 function rebuildPosteriors(){
   strata.clear();
-  // rebuild from ALL using stored verdicts (ALL has the capitalization feature)
+  // rebuild from ALL using stored verdicts; populate every backoff level
   for(const it of ALL){
     const v = verdicts.get(it.key);
     if(!v || v.verdict==='maybe') continue;
-    const s = getStratum(stratumKey(it));
-    if(v.verdict==='card') s.a++; else s.b++;
+    for(const k of backoffKeys(it)){
+      const s=getStratum(k);
+      if(v.verdict==='card') s.a++; else s.b++;
+    }
   }
 }
 function buildPool(){
@@ -233,8 +251,8 @@ function startSession(){
 
 function pickNext(){
   if(pool.length===0) return null;
-  // Thompson sample a stratum, then take highest-count unseen item from it.
-  // Group pool indices by stratum lazily.
+  // Group pool by finest stratum key, but score each group via itemPosterior
+  // (which backs off to coarser strata when the finest cell is data-thin).
   const byStratum = new Map();
   for(const it of pool){
     const k=stratumKey(it);
@@ -243,11 +261,10 @@ function pickNext(){
   }
   let best=null, bestSample=-1;
   for(const [k,items] of byStratum){
-    const s=getStratum(k);
+    const s=itemPosterior(items[0]);   // representative item for the group
     const draw=sampleBeta(s.a,s.b);
     if(draw>bestSample){ bestSample=draw; best=items; }
   }
-  // highest count within chosen stratum
   best.sort((x,y)=>y.count-x.count);
   return best[0];
 }
@@ -262,6 +279,7 @@ function next(){
   el.className='card'; el.id='liveCard';
   const tags=[];
   tags.push(`<span class="tag">${it.capitalized?'name/title':'common word'}</span>`);
+  if(it.category && it.category!=='Mixed') tags.push(`<span class="tag">${esc(it.category)}</span>`);
   el.innerHTML=`<div class="stamp left">Card it</div><div class="stamp right">Know it</div><div class="stamp up">Maybe</div>
     <div class="freq">seen ${it.count}×</div>
     <div class="answer">${esc(it.answer)}</div>
@@ -312,7 +330,7 @@ function record(verdict){
   const it=current;
   verdicts.set(it.key,{key:it.key,answer:it.answer,count:it.count,verdict});
   history.push(it.key);
-  if(verdict!=='maybe'){ const s=getStratum(stratumKey(it)); if(verdict==='card')s.a++; else s.b++; }
+  if(verdict!=='maybe'){ for(const k of backoffKeys(it)){ const s=getStratum(k); if(verdict==='card')s.a++; else s.b++; } }
   pool=pool.filter(x=>x.key!==it.key);
   toast(verdict==='card'?'→ card list':verdict==='know'?'skipped':'maybe');
   setTimeout(next,160);
@@ -320,7 +338,7 @@ function record(verdict){
 function undo(){
   if(history.length===0)return;
   const k=history.pop(); const v=verdicts.get(k); verdicts.delete(k);
-  if(v && v.verdict!=='maybe'){ const it=ALL.find(x=>x.key===k); if(it){ const s=getStratum(stratumKey(it)); if(v.verdict==='card')s.a=Math.max(1,s.a-1); else s.b=Math.max(1,s.b-1); } }
+  if(v && v.verdict!=='maybe'){ const it=ALL.find(x=>x.key===k); if(it){ for(const bk of backoffKeys(it)){ const s=getStratum(bk); if(v.verdict==='card')s.a=Math.max(1,s.a-1); else s.b=Math.max(1,s.b-1); } } }
   buildPool();
   const cur=document.getElementById('liveCard'); if(cur)cur.remove();
   current=ALL.find(x=>x.key===k)||null;
@@ -328,7 +346,7 @@ function undo(){
     const it=current; const el=document.createElement('div'); el.className='card'; el.id='liveCard';
     el.innerHTML=`<div class="stamp left">Card it</div><div class="stamp right">Know it</div><div class="stamp up">Maybe</div>
       <div class="freq">seen ${it.count}×</div><div class="answer">${esc(it.answer)}</div>
-      <div class="tags"><span class="tag">${it.capitalized?'name/title':'common word'}</span></div>`;
+      <div class="tags"><span class="tag">${it.capitalized?'name/title':'common word'}</span>${it.category&&it.category!=='Mixed'?'<span class="tag">'+esc(it.category)+'</span>':''}</div>`;
     document.getElementById('stage').appendChild(el); attachDrag(el);
   }
   updateStats();
